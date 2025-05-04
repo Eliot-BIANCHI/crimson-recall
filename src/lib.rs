@@ -1,10 +1,14 @@
-use constants::CANVAS;
-use sprite::Sprite;
+use gloo::events::EventListener;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
+use constants::CANVAS;
+use events::{key_down, key_up};
+use sprite::{Player, Sprite, SpriteKind};
+
 mod constants;
+mod events;
 mod sprite;
 
 fn get_window() -> web_sys::Window {
@@ -25,6 +29,7 @@ fn request_animation_frame(f: &Closure<dyn FnMut()>) {
 
 #[wasm_bindgen(start)]
 pub fn run() -> Result<(), JsValue> {
+    let window = get_window();
     let document = get_document();
 
     let canvas = document
@@ -43,7 +48,14 @@ pub fn run() -> Result<(), JsValue> {
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
 
-    let mut player = Sprite::new(50.0, 100.0, 100.0, 200.0, "blue".to_string());
+    let mut player = Sprite::new(
+        SpriteKind::Player(Player::new()),
+        50.0,
+        100.0,
+        100.0,
+        200.0,
+        "blue".to_string(),
+    );
 
     *g.borrow_mut() = Some(Closure::new(move || {
         ctx.clear_rect(0.0, 0.0, CANVAS.width(), CANVAS.height());
@@ -57,6 +69,9 @@ pub fn run() -> Result<(), JsValue> {
     }));
 
     request_animation_frame(g.borrow().as_ref().unwrap());
+
+    EventListener::new(&window, "keydown", key_down).forget();
+    EventListener::new(&window, "keyup", key_up).forget();
 
     Ok(())
 }

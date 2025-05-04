@@ -1,3 +1,24 @@
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+pub struct Keys {
+    pub d: KeyState,
+    pub a: KeyState,
+    pub w: KeyState,
+}
+
+pub struct KeyState {
+    pub pressed: bool,
+}
+
+pub static KEYS: Lazy<Mutex<Keys>> = Lazy::new(|| {
+    Mutex::new(Keys {
+        d: KeyState { pressed: false },
+        a: KeyState { pressed: false },
+        w: KeyState { pressed: false },
+    })
+});
+
 pub struct Canvas {
     width: f64,
     height: f64,

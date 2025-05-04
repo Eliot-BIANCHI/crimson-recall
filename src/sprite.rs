@@ -1,5 +1,6 @@
-use crate::constants::CANVAS;
 use web_sys::CanvasRenderingContext2d;
+
+use crate::constants::{CANVAS, KEYS};
 
 struct Position {
     x: f64,
@@ -11,7 +12,22 @@ struct Velocity {
     y: f64,
 }
 
+pub struct Player {
+    jumping: bool,
+}
+
+impl Player {
+    pub fn new() -> Self {
+        Self { jumping: false }
+    }
+}
+
+pub enum SpriteKind {
+    Player(Player),
+}
+
 pub struct Sprite {
+    kind: SpriteKind,
     position: Position,
     width: f64,
     height: f64,
@@ -20,8 +36,9 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    pub fn new(x: f64, y: f64, width: f64, height: f64, color: String) -> Self {
+    pub fn new(kind: SpriteKind, x: f64, y: f64, width: f64, height: f64, color: String) -> Self {
         Self {
+            kind,
             position: Position { x, y },
             width,
             height,
@@ -43,6 +60,27 @@ impl Sprite {
             self.velocity.y += CANVAS.gravity()
         } else {
             self.velocity.y = 0.0
+        }
+
+        match &mut self.kind {
+            SpriteKind::Player(player) => {
+                let Ok(keys) = KEYS.lock() else { return };
+
+                if keys.d.pressed {
+                    self.velocity.x = 5.0;
+                } else if keys.a.pressed {
+                    self.velocity.x = -5.0;
+                } else {
+                    self.velocity.x = 0.0;
+                }
+
+                if keys.w.pressed && !player.jumping && self.velocity.y == 0.0 {
+                    player.jumping = true;
+                    self.velocity.y = -8.0;
+                } else if self.velocity.y == 0.0 {
+                    player.jumping = false
+                };
+            }
         }
     }
 }
