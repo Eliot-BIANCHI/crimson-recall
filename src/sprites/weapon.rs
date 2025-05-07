@@ -5,22 +5,28 @@ use crate::{
         position::Position,
         velocity::Velocity,
     },
-    constants::{
-        canvas::CANVAS,
-        controls::{KEYS, MOUSE},
-        player::PLAYER,
-        weapon::WEAPON,
-    },
+    constants::{canvas::CANVAS, weapon::WEAPON},
 };
 
-use super::{
-    Sprite,
-    platform::Platform,
-    weapon::{StuckOn, Weapon, WeaponState},
-};
+use super::{Sprite, platform::Platform, player::Player};
 
-pub struct Player {
-    jumping: bool,
+pub enum StuckOn {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+pub enum WeaponState {
+    Carried,
+    Thrown,
+    Stuck(StuckOn),
+}
+
+pub struct Weapon {
+    state: WeaponState,
+    angle: f64,
+    angular_velocity: f64,
     position: Position,
     previous_position: Position,
     width: f64,
@@ -30,7 +36,7 @@ pub struct Player {
     color: String,
 }
 
-impl Player {
+impl Weapon {
     pub fn new(
         x: f64,
         y: f64,
@@ -40,7 +46,9 @@ impl Player {
         color: String,
     ) -> Self {
         Self {
-            jumping: false,
+            state: WeaponState::Carried,
+            angle: 0.0,
+            angular_velocity: 0.01,
             position: Position::new(x, y),
             previous_position: Position::new(x, y),
             width,
@@ -54,79 +62,72 @@ impl Player {
         }
     }
 
-    pub fn apply_keys(&mut self) {
-        let Ok(keys) = KEYS.lock() else { return };
+    pub fn throw(&mut self, target_x: f64, target_y: f64) {
+        let dx = target_x - self.position.x();
+        let dy = target_y - self.position.y();
 
-        if keys.d.pressed {
-            self.velocity.set_x(PLAYER.velocity().x());
-        } else if keys.a.pressed {
-            self.velocity.set_x(-PLAYER.velocity().x());
-        } else {
-            self.velocity.set_x(0.0);
-        }
+        let angle = dy.atan2(dx);
+        let distance = (dx.powi(2) + dy.powi(2)).sqrt();
 
-        if keys.w.pressed && !self.jumping && self.velocity.y() == 0.0 {
-            self.jumping = true;
-            self.velocity.set_y(PLAYER.velocity().jump());
-        } else if self.velocity.y() == 0.0 {
-            self.jumping = false;
-        }
+        let power = (distance / 10.0).min(20.0);
+
+        self.velocity.set_x(angle.cos() * power);
+        self.velocity.set_y(angle.sin() * power);
     }
 
-    pub fn apply_clicks(&mut self, weapon: &mut Weapon) {
-        let Ok(mut mouse) = MOUSE.lock() else { return };
-
-        if !mouse.right.pressed {
-            return;
-        }
-
-        match weapon.state() {
-            WeaponState::Carried => {
-                weapon.throw(mouse.right.x, mouse.right.y);
-                weapon.set_state(WeaponState::Thrown);
-                self.collision_box.set_width(PLAYER.sprite().width());
-            }
-            WeaponState::Thrown => {}
-            WeaponState::Stuck(stuck_on) => {
-                self.teleport_to_weapon(weapon, stuck_on);
-                weapon.set_state(WeaponState::Carried);
-                self.collision_box
-                    .set_width(PLAYER.sprite().width() + WEAPON.sprite().width());
-            }
-        }
-
-        mouse.right.pressed = false;
+    pub fn follow_player(&mut self, player: &Player) {
+        self.position
+            .set_x(player.position().x() + WEAPON.sprite().x_offset());
+        self.position
+            .set_y(player.position().y() + WEAPON.sprite().y_offset());
     }
 
-    fn teleport_to_weapon(&mut self, weapon: &Weapon, stuck_on: &StuckOn) {
-        match stuck_on {
-            StuckOn::Left => {
-                self.position.set_x(weapon.position().x());
-                self.position
-                    .set_y(weapon.position().y() + weapon.height() - self.height);
-            }
-            StuckOn::Right => {
-                self.position
-                    .set_x(weapon.position().x() - self.collision_box.width());
-                self.position
-                    .set_y(weapon.position().y() + weapon.height() - self.height);
-            }
-            StuckOn::Top => {
-                self.position
-                    .set_x(weapon.position().x() - self.collision_box.width());
-                self.position.set_y(weapon.position().y());
-            }
-            StuckOn::Bottom => {
-                self.position
-                    .set_x(weapon.position().x() - self.collision_box.width());
-                self.position
-                    .set_y(weapon.position().y() + weapon.height() - self.height);
-            }
-        }
+    pub fn state(&self) -> &WeaponState {
+        &self.state
+    }
+
+    pub fn set_state(&mut self, state: WeaponState) {
+        self.state = state;
     }
 }
 
-impl Sprite for Player {
+impl Sprite for Weapon {
+    fn draw(&self, ctx: &web_sys::CanvasRenderingContext2d) {
+        match self.state {
+            WeaponState::Carried | WeaponState::Stuck(_) => {
+                ctx.save();
+
+                if ctx
+                    .translate(
+                        self.position.x() + self.width / 2.0,
+                        self.position.y() + self.height / 2.0,
+                    )
+                    .is_ok()
+                    && ctx.rotate(self.angle).is_ok()
+                {
+                    ctx.set_fill_style_str(&self.color());
+                    ctx.fill_rect(
+                        -self.width / 2.0,
+                        -self.height / 2.0,
+                        self.width,
+                        self.height,
+                    );
+                }
+
+                ctx.restore();
+            }
+            WeaponState::Thrown => {
+                ctx.set_fill_style_str(&self.color);
+                ctx.fill_rect(
+                    self.position.x(),
+                    self.position.y(),
+                    self.width,
+                    self.height,
+                );
+            }
+        }
+    }
+
     fn apply_physics(&mut self) {
         self.previous_position.set_x(self.position.x());
         self.previous_position.set_y(self.position.y());
@@ -138,7 +139,11 @@ impl Sprite for Player {
             self.velocity.mutate_y(CANVAS.gravity());
         } else {
             self.velocity.set_y(0.0);
+            self.position.set_y(CANVAS.height() - self.height);
+            self.state = WeaponState::Stuck(StuckOn::Bottom);
         }
+
+        self.angle = self.angular_velocity;
     }
 
     fn resolve_collisions(&mut self, platforms: &Vec<Platform>) {
@@ -156,21 +161,25 @@ impl Sprite for Player {
                     self.velocity.set_x(0.0);
                     self.position
                         .set_x(platform.position().x() - self.collision_box.width());
+                    self.state = WeaponState::Stuck(StuckOn::Right);
                 }
                 Collision::Right => {
                     self.velocity.set_x(0.0);
                     self.position
                         .set_x(platform.position().x() + platform.width());
+                    self.state = WeaponState::Stuck(StuckOn::Left);
                 }
                 Collision::Top => {
                     self.velocity.set_y(0.0);
                     self.position
                         .set_y(platform.position().y() - self.collision_box.height());
+                    self.state = WeaponState::Stuck(StuckOn::Bottom);
                 }
                 Collision::Bottom => {
                     self.velocity.set_y(0.0);
                     self.position
                         .set_y(platform.position().y() + platform.collision_box().height());
+                    self.state = WeaponState::Stuck(StuckOn::Top);
                 }
             }
         }

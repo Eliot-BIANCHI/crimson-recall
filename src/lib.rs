@@ -1,11 +1,17 @@
-use gloo::events::EventListener;
-use sprites::Sprite;
+use components::hit_box::HitBox;
+use constants::{canvas::CANVAS, player::PLAYER, weapon::WEAPON};
+use gloo::events::{EventListener, EventListenerOptions};
+use sprites::{
+    Sprite,
+    platform::Platform,
+    player::Player,
+    weapon::{Weapon, WeaponState},
+};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use constants::CANVAS;
-use events::{key_down, key_up};
+use events::{key_down, key_up, left_click, right_click};
 
 mod components;
 mod constants;
@@ -49,18 +55,30 @@ pub fn run() -> Result<(), JsValue> {
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
 
-    let mut sprites = [Sprite::new_player(
+    let mut player = Player::new(
         40.0,
         20.0,
-        100.0,
-        200.0,
-        None,
+        PLAYER.sprite().width(),
+        PLAYER.sprite().height(),
+        Some(HitBox::new(
+            PLAYER.sprite().width() + WEAPON.sprite().width(),
+            PLAYER.sprite().height(),
+        )),
         "blue".to_string(),
-    )];
+    );
+
+    let mut weapon = Weapon::new(
+        40.0,
+        20.0,
+        WEAPON.sprite().width(),
+        WEAPON.sprite().height(),
+        None,
+        "red".to_string(),
+    );
 
     let platforms = vec![
-        Sprite::new_platform(500.0, 500.0, 300.0, 150.0, None, "orange".to_string()),
-        Sprite::new_platform(200.0, 200.0, 400.0, 100.0, None, "purple".to_string()),
+        Platform::new(500.0, 500.0, 300.0, 150.0, None, "orange".to_string()),
+        Platform::new(200.0, 200.0, 400.0, 100.0, None, "purple".to_string()),
     ];
 
     *g.borrow_mut() = Some(Closure::new(move || {
@@ -72,9 +90,21 @@ pub fn run() -> Result<(), JsValue> {
             platform.draw(&ctx);
         }
 
-        for sprite in &mut sprites {
-            sprite.draw(&ctx);
-            sprite.update(&platforms);
+        player.draw(&ctx);
+        player.apply_physics();
+        player.resolve_collisions(&platforms);
+        player.apply_keys();
+        player.apply_clicks(&mut weapon);
+
+        weapon.draw(&ctx);
+
+        match weapon.state() {
+            WeaponState::Carried => weapon.follow_player(&player),
+            WeaponState::Thrown => {
+                weapon.apply_physics();
+                weapon.resolve_collisions(&platforms);
+            }
+            WeaponState::Stuck(_) => {}
         }
 
         request_animation_frame(f.borrow().as_ref().unwrap());
@@ -84,6 +114,16 @@ pub fn run() -> Result<(), JsValue> {
 
     EventListener::new(&window, "keydown", key_down).forget();
     EventListener::new(&window, "keyup", key_up).forget();
+
+    EventListener::new(&canvas, "click", left_click).forget();
+
+    EventListener::new_with_options(
+        &canvas,
+        "contextmenu",
+        EventListenerOptions::enable_prevent_default(),
+        right_click,
+    )
+    .forget();
 
     Ok(())
 }
